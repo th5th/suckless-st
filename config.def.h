@@ -5,9 +5,9 @@
  *
  * font: see http://freedesktop.org/software/fontconfig/fontconfig-user.html
  */
-static char font[] = "Liberation Mono:pixelsize=12:antialias=false:autohint=false";
+static char font[] = "Inconsolata:pixelsize=16:antialias=true:autohint=true";
 static int borderpx = 2;
-static char shell[] = "/bin/sh";
+static char shell[] = "/bin/bash";
 
 /* timeouts (in milliseconds) */
 static unsigned int doubleclicktimeout = 300;
@@ -20,8 +20,8 @@ static bool allowaltscreen = true;
 static unsigned int xfps = 60;
 static unsigned int actionfps = 30;
 
-/* TERM value */
-static char termname[] = "st-256color";
+/* TERM value - use xterm to make arch colours hack work FIXME */
+static char termname[] = "xterm"
 
 static unsigned int tabspaces = 8;
 
