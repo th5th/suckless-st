@@ -21,7 +21,7 @@ static unsigned int xfps = 60;
 static unsigned int actionfps = 30;
 
 /* TERM value - use xterm to make arch colours hack work FIXME */
-static char termname[] = "xterm"
+static char termname[] = "xterm";
 
 static unsigned int tabspaces = 8;
 
