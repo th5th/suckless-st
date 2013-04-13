@@ -758,7 +758,7 @@ bpress(XEvent *e) {
 void
 selcopy(void) {
 	char *str, *ptr, *p;
-	int x, y, bufsize, is_selected = 0, size;
+	int x, y, bufsize, isselected = 0, size;
 	Glyph *gp, *last;
 
 	if(sel.bx == -1) {
@@ -769,7 +769,7 @@ selcopy(void) {
 
 		/* append every set & selected glyph to the selection */
 		for(y = sel.b.y; y < sel.e.y + 1; y++) {
-			is_selected = 0;
+			isselected = 0;
 			gp = &term.line[y][0];
 			last = gp + term.col;
 
@@ -780,7 +780,7 @@ selcopy(void) {
 				if(!selected(x, y)) {
 					continue;
 				} else {
-					is_selected = 1;
+					isselected = 1;
 				}
 
 				p = (gp->state & GLYPH_SET) ? gp->c : " ";
@@ -788,9 +788,18 @@ selcopy(void) {
 				memcpy(ptr, p, size);
 				ptr += size;
 			}
-			/* \n at the end of every selected line except for the last one */
-			if(is_selected && y < sel.e.y)
-				*ptr++ = '\r';
+
+			/*
+			 * Copy and pasting of line endings is inconsistent
+			 * in the inconsistent terminal and GUI world.
+			 * The best solution seems like to produce '\n' when
+			 * something is copied from st and convert '\n' to
+			 * '\r', when something to be pasted is received by
+			 * st.
+			 * FIXME: Fix the computer world.
+			 */
+			if(isselected && y < sel.e.y)
+				*ptr++ = '\n';
 		}
 		*ptr = 0;
 	}
@@ -801,7 +810,7 @@ void
 selnotify(XEvent *e) {
 	ulong nitems, ofs, rem;
 	int format;
-	uchar *data;
+	uchar *data, *last, *repl;
 	Atom type;
 
 	ofs = 0;
@@ -812,7 +821,21 @@ selnotify(XEvent *e) {
 			fprintf(stderr, "Clipboard allocation failed\n");
 			return;
 		}
-		ttywrite((const char *) data, nitems * format / 8);
+
+		/*
+		 * As seen in selcopy:
+		 * Line endings are inconsistent in the terminal and GUI world
+		 * copy and pasting. When receiving some selection data,
+		 * replace all '\n' with '\r'.
+		 * FIXME: Fix the computer world.
+		 */
+		repl = data;
+		last = data + nitems * format / 8;
+		while((repl = memchr(repl, '\n', last - repl))) {
+			*repl++ = '\r';
+		}
+
+		ttywrite((const char *)data, nitems * format / 8);
 		XFree(data);
 		/* number of 32-bit chunks returned */
 		ofs += nitems * format / 32;
@@ -2335,10 +2358,8 @@ xresize(int col, int row) {
 	XFreePixmap(xw.dpy, xw.buf);
 	xw.buf = XCreatePixmap(xw.dpy, xw.win, xw.w, xw.h,
 			DefaultDepth(xw.dpy, xw.scr));
-	XSetForeground(xw.dpy, dc.gc, dc.col[IS_SET(MODE_REVERSE) ? defaultfg : defaultbg].pixel);
-	XFillRectangle(xw.dpy, xw.buf, dc.gc, 0, 0, xw.w, xw.h);
-
 	XftDrawChange(xw.draw, xw.buf);
+	xclear(0, 0, xw.w, xw.h);
 }
 
 static inline ushort
@@ -2945,14 +2966,33 @@ xdrawcursor(void) {
 
 	/* draw the new one */
 	if(!(IS_SET(MODE_HIDE))) {
-		if(!(xw.state & WIN_FOCUSED))
-			g.bg = defaultucs;
+		if(xw.state & WIN_FOCUSED) {
+			if(IS_SET(MODE_REVERSE)) {
+				g.mode |= ATTR_REVERSE;
+				g.fg = defaultcs;
+				g.bg = defaultfg;
+			}
 
-		if(IS_SET(MODE_REVERSE))
-			g.mode |= ATTR_REVERSE, g.fg = defaultcs, g.bg = defaultfg;
-
-		sl = utf8size(g.c);
-		xdraws(g.c, g, term.c.x, term.c.y, 1, sl);
+			sl = utf8size(g.c);
+			xdraws(g.c, g, term.c.x, term.c.y, 1, sl);
+		} else {
+			XftDrawRect(xw.draw, &dc.col[defaultcs],
+					borderpx + term.c.x * xw.cw,
+					borderpx + term.c.y * xw.ch,
+					xw.cw - 1, 1);
+			XftDrawRect(xw.draw, &dc.col[defaultcs],
+					borderpx + term.c.x * xw.cw,
+					borderpx + term.c.y * xw.ch,
+					1, xw.ch - 1);
+			XftDrawRect(xw.draw, &dc.col[defaultcs],
+					borderpx + (term.c.x + 1) * xw.cw - 1,
+					borderpx + term.c.y * xw.ch,
+					1, xw.ch - 1);
+			XftDrawRect(xw.draw, &dc.col[defaultcs],
+					borderpx + term.c.x * xw.cw,
+					borderpx + (term.c.y + 1) * xw.ch - 1,
+					xw.cw, 1);
+		}
 		oldx = term.c.x, oldy = term.c.y;
 	}
 }
