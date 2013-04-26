@@ -20,11 +20,13 @@ static bool allowaltscreen = true;
 static unsigned int xfps = 60;
 static unsigned int actionfps = 30;
 
+/* blinking timeout (set to 0 to disable blinking) */
+static unsigned int blinktimeout = 800;
+
 /* TERM value - use xterm to make arch colours hack work FIXME */
 static char termname[] = "xterm";
 
 static unsigned int tabspaces = 8;
-
 
 /* Terminal colors (16 first used in escape sequence) */
 static const char *colorname[] = {

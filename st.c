@@ -36,6 +36,7 @@ char *argv0;
 #define Draw XftDraw *
 #define Colour XftColor
 #define Colourmap Colormap
+#define Rectangle XRectangle
 
 #if   defined(__linux)
  #include <pty.h>
@@ -114,6 +115,9 @@ enum term_mode {
 	MODE_ECHO	 = 1024,
 	MODE_APPCURSOR	 = 2048,
 	MODE_MOUSESGR    = 4096,
+	MODE_8BIT	 = 8192,
+	MODE_BLINK	 = 16384,
+	MODE_FBLINK	 = 32768,
 };
 
 enum escape_state {
@@ -311,6 +315,7 @@ static void strhandle(void);
 static void strparse(void);
 static void strreset(void);
 
+static int tattrset(int);
 static void tclearregion(int, int, int, int);
 static void tcursor(int);
 static void tdeletechar(int);
@@ -332,6 +337,7 @@ static void tsetchar(char *, Glyph *, int, int);
 static void tsetscroll(int, int);
 static void tswapscreen(void);
 static void tsetdirt(int, int);
+static void tsetdirtattr(int);
 static void tsetmode(bool, bool, int *, int);
 static void tfulldirt(void);
 static void techo(char *, int);
@@ -783,11 +789,8 @@ bpress(XEvent *e) {
 		sel.ey = sel.by = y2row(e->xbutton.y);
 
 		/*
-		 * Snap handling.
-		 * If user clicks are fasst enough (e.g. below timeouts),
-		 * we ignore if his hand slipped left or down and accidentally
-		 * selected more; we are just snapping to whatever we're
-		 * snapping.
+		 * If the user clicks below predefined timeouts specific
+		 * snapping behaviour is exposed.
 		 */
 		if(TIMEDIFF(now, sel.tclick2) <= tripleclicktimeout) {
 			sel.snap = SNAP_LINE;
@@ -807,7 +810,8 @@ bpress(XEvent *e) {
 		 * Draw selection, unless it's regular and we don't want to
 		 * make clicks visible
 		 */
-		if (sel.snap != 0) {
+		if(sel.snap != 0) {
+			sel.mode++;
 			tsetdirt(sel.b.y, sel.e.y);
 			draw();
 		}
@@ -985,14 +989,14 @@ brelease(XEvent *e) {
 	if(e->xbutton.button == Button2) {
 		selpaste(NULL);
 	} else if(e->xbutton.button == Button1) {
-		sel.mode = 0;
-		getbuttoninfo(e);
-		term.dirty[sel.ey] = 1;
-		if(sel.bx == sel.ex && sel.by == sel.ey) {
+		if(sel.mode < 2) {
 			sel.bx = -1;
 		} else {
+			getbuttoninfo(e);
 			selcopy();
 		}
+		sel.mode = 0;
+		term.dirty[sel.ey] = 1;
 	}
 }
 
@@ -1008,6 +1012,7 @@ bmotion(XEvent *e) {
 	if(!sel.mode)
 		return;
 
+	sel.mode++;
 	oldey = sel.ey;
 	oldex = sel.ex;
 	oldsby = sel.b.y;
@@ -1174,6 +1179,20 @@ ttyresize(void) {
 		fprintf(stderr, "Couldn't set window size: %s\n", SERRNO);
 }
 
+int
+tattrset(int attr) {
+	int i, j;
+
+	for(i = 0; i < term.row-1; i++) {
+		for(j = 0; j < term.col-1; j++) {
+			if(term.line[i][j].mode & attr)
+				return 1;
+		}
+	}
+
+	return 0;
+}
+
 void
 tsetdirt(int top, int bot) {
 	int i;
@@ -1183,6 +1202,20 @@ tsetdirt(int top, int bot) {
 
 	for(i = top; i <= bot; i++)
 		term.dirty[i] = 1;
+}
+
+void
+tsetdirtattr(int attr) {
+	int i, j;
+
+	for(i = 0; i < term.row-1; i++) {
+		for(j = 0; j < term.col-1; j++) {
+			if(term.line[i][j].mode & attr) {
+				tsetdirt(i, i);
+				break;
+			}
+		}
+	}
 }
 
 void
@@ -1423,6 +1456,8 @@ tclearregion(int x1, int y1, int x2, int y2) {
 	for(y = y1; y <= y2; y++) {
 		term.dirty[y] = 1;
 		for(x = x1; x <= x2; x++) {
+			if(selected(x, y))
+				selclear(NULL);
 			term.line[y][x] = term.c.attr;
 			memcpy(term.line[y][x].c, " ", 2);
 		}
@@ -1649,6 +1684,9 @@ tsetmode(bool priv, bool set, int *args, int narg) {
 				break;
 			case 1006:
 				MODBIT(term.mode, set, MODE_MOUSESGR);
+				break;
+			case 1034:
+				MODBIT(term.mode, set, MODE_8BIT);
 				break;
 			case 1049: /* = 1047 and 1048 */
 			case 47:
@@ -2760,6 +2798,7 @@ xdraws(char *s, Glyph base, int x, int y, int charlen, int bytelen) {
 	FcCharSet *fccharset;
 	Colour *fg, *bg, *temp, revfg, revbg;
 	XRenderColor colfg, colbg;
+	Rectangle r;
 
 	frcflags = FRC_NORMAL;
 
@@ -2831,6 +2870,9 @@ xdraws(char *s, Glyph base, int x, int y, int charlen, int bytelen) {
 		bg = temp;
 	}
 
+	if(base.mode & ATTR_BLINK && term.mode & MODE_BLINK)
+		fg = bg;
+
 	/* Intelligent cleaning up of the borders. */
 	if(x == 0) {
 		xclear(0, (y == 0)? 0 : winy, borderpx,
@@ -2847,6 +2889,13 @@ xdraws(char *s, Glyph base, int x, int y, int charlen, int bytelen) {
 
 	/* Clean up the region we want to draw to. */
 	XftDrawRect(xw.draw, bg, winx, winy, width, xw.ch);
+
+	/* Set the clip region because Xft is sometimes dirty. */
+	r.x = 0;
+	r.y = 0;
+	r.height = xw.ch;
+	r.width = width;
+	XftDrawSetClipRectangles(xw.draw, winx, winy, &r, 1);
 
 	fcsets[0] = font->set;
 	for(xp = winx; bytelen > 0;) {
@@ -2881,6 +2930,7 @@ xdraws(char *s, Glyph base, int x, int y, int charlen, int bytelen) {
 							(FcChar8 *)u8fs,
 							u8fblen);
 					xp += font->width * u8fl;
+
 				}
 				break;
 			}
@@ -2965,6 +3015,9 @@ xdraws(char *s, Glyph base, int x, int y, int charlen, int bytelen) {
 		XftDrawRect(xw.draw, fg, winx, winy + font->ascent + 1,
 				width, 1);
 	}
+
+	/* Reset clip to none. */
+	XftDrawSetClip(xw.draw, 0);
 }
 
 void
@@ -3077,7 +3130,7 @@ drawregion(int x1, int y1, int x2, int y2) {
 		ic = ib = ox = 0;
 		for(x = x1; x < x2; x++) {
 			new = term.line[y][x];
-			if(ena_sel && *(new.c) && selected(x, y))
+			if(ena_sel && selected(x, y))
 				new.mode ^= ATTR_REVERSE;
 			if(ib > 0 && (ATTRCMP(base, new)
 					|| ib >= DRAW_BUF_SIZ-UTF_SIZ)) {
@@ -3228,7 +3281,8 @@ kpress(XEvent *ev) {
 	XKeyEvent *e = &ev->xkey;
 	KeySym ksym;
 	char xstr[31], buf[32], *customkey, *cp = buf;
-	int len;
+	int len, ret;
+	long c;
 	Status status;
 	Shortcut *bp;
 
@@ -3249,13 +3303,23 @@ kpress(XEvent *ev) {
 	if((customkey = kmap(ksym, e->state))) {
 		len = strlen(customkey);
 		memcpy(buf, customkey, len);
-	/* 2. hardcoded (overrides X lookup) */
+	/* 3. hardcoded (overrides X lookup) */
 	} else {
 		if(len == 0)
 			return;
 
-		if(len == 1 && e->state & Mod1Mask)
-			*cp++ = '\033';
+		if(len == 1 && e->state & Mod1Mask) {
+			if(IS_SET(MODE_8BIT)) {
+				if(*xstr < 0177) {
+					c = *xstr | B7;
+					ret = utf8encode(&c, cp);
+					cp += ret;
+					len = 0;
+				}
+			} else {
+				*cp++ = '\033';
+			}
+		}
 
 		memcpy(cp, xstr, len);
 		len = cp - buf + len;
@@ -3316,34 +3380,55 @@ void
 run(void) {
 	XEvent ev;
 	fd_set rfd;
-	int xfd = XConnectionNumber(xw.dpy), xev;
-	struct timeval drawtimeout, *tv = NULL, now, last;
+	int xfd = XConnectionNumber(xw.dpy), xev, blinkset = 0, dodraw = 0;
+	struct timeval drawtimeout, *tv = NULL, now, last, lastblink;
 
+	gettimeofday(&lastblink, NULL);
 	gettimeofday(&last, NULL);
 
 	for(xev = actionfps;;) {
 		FD_ZERO(&rfd);
 		FD_SET(cmdfd, &rfd);
 		FD_SET(xfd, &rfd);
-		if(select(MAX(xfd, cmdfd)+1, &rfd, NULL, NULL, tv) < 0) {
+
+		switch(select(MAX(xfd, cmdfd)+1, &rfd, NULL, NULL, tv) < 0) {
+		case -1:
 			if(errno == EINTR)
 				continue;
 			die("select failed: %s\n", SERRNO);
-		}
+		default:
+			if(FD_ISSET(cmdfd, &rfd)) {
+				ttyread();
+				if(blinktimeout) {
+					blinkset = tattrset(ATTR_BLINK);
+					if(!blinkset && term.mode & ATTR_BLINK)
+						term.mode &= ~(MODE_BLINK);
+				}
+			}
 
+			if(FD_ISSET(xfd, &rfd))
+				xev = actionfps;
+			break;
+		}
 		gettimeofday(&now, NULL);
 		drawtimeout.tv_sec = 0;
 		drawtimeout.tv_usec = (1000/xfps) * 1000;
 		tv = &drawtimeout;
 
-		if(FD_ISSET(cmdfd, &rfd))
-			ttyread();
+		dodraw = 0;
+		if(blinktimeout && TIMEDIFF(now, lastblink) > blinktimeout) {
+			tsetdirtattr(ATTR_BLINK);
+			term.mode ^= MODE_BLINK;
+			gettimeofday(&lastblink, NULL);
+			dodraw = 1;
+		}
+		if(TIMEDIFF(now, last) \
+				> (xev? (1000/xfps) : (1000/actionfps))) {
+			dodraw = 1;
+			last = now;
+		}
 
-		if(FD_ISSET(xfd, &rfd))
-			xev = actionfps;
-
-		if(TIMEDIFF(now, last) > \
-				(xev ? (1000/xfps) : (1000/actionfps))) {
+		if(dodraw) {
 			while(XPending(xw.dpy)) {
 				XNextEvent(xw.dpy, &ev);
 				if(XFilterEvent(&ev, None))
@@ -3354,12 +3439,17 @@ run(void) {
 
 			draw();
 			XFlush(xw.dpy);
-			last = now;
 
 			if(xev && !FD_ISSET(xfd, &rfd))
 				xev--;
-			if(!FD_ISSET(cmdfd, &rfd) && !FD_ISSET(xfd, &rfd))
-				tv = NULL;
+			if(!FD_ISSET(cmdfd, &rfd) && !FD_ISSET(xfd, &rfd)) {
+				if(blinkset) {
+					drawtimeout.tv_usec = 1000 * \
+						blinktimeout;
+				} else {
+					tv = NULL;
+				}
+			}
 		}
 	}
 }
