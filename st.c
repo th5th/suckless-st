@@ -229,6 +229,12 @@ typedef struct {
 } XWindow;
 
 typedef struct {
+	int b;
+	uint mask;
+	char s[ESC_BUF_SIZ];
+} Mousekey;
+
+typedef struct {
 	KeySym k;
 	uint mask;
 	char s[ESC_BUF_SIZ];
@@ -675,13 +681,49 @@ void
 selsnap(int mode, int *x, int *y, int direction) {
 	switch(mode) {
 	case SNAP_WORD:
-		while(*x > 0 && *x < term.col-1
-				&& term.line[*y][*x + direction].c[0] != ' ') {
+		for(;;) {
+			if(direction < 0 && *x <= 0) {
+				if(*y > 0 && term.line[*y - 1][term.col-1].mode
+						& ATTR_WRAP) {
+					*y -= 1;
+					*x = term.col-1;
+				} else {
+					break;
+				}
+			}
+			if(direction > 0 && *x >= term.col-1) {
+				if(*y < term.row-1 && term.line[*y][*x].mode
+						& ATTR_WRAP) {
+					*y += 1;
+					*x = 0;
+				} else {
+					break;
+				}
+			}
+
+			if(term.line[*y][*x + direction].c[0] == ' ')
+				break;
+
 			*x += direction;
 		}
 		break;
 	case SNAP_LINE:
 		*x = (direction < 0) ? 0 : term.col - 1;
+		if(direction < 0 && *y > 0) {
+			for(; *y > 0; *y += direction) {
+				if(!(term.line[*y-1][term.col-1].mode
+						& ATTR_WRAP)) {
+					break;
+				}
+			}
+		} else if(direction > 0 && *y < term.row-1) {
+			for(; *y < term.row; *y += direction) {
+				if(!(term.line[*y][term.col-1].mode
+						& ATTR_WRAP)) {
+					break;
+				}
+			}
+		}
 		break;
 	default:
 		break;
@@ -771,10 +813,24 @@ mousereport(XEvent *e) {
 void
 bpress(XEvent *e) {
 	struct timeval now;
+	Mousekey *mk;
 
 	if(IS_SET(MODE_MOUSE)) {
 		mousereport(e);
-	} else if(e->xbutton.button == Button1) {
+		return;
+	}
+
+	for(mk = mshortcuts; mk < mshortcuts + LEN(mshortcuts); mk++) {
+		if(e->xbutton.button == mk->b
+				&& match(mk->mask, e->xbutton.state)) {
+			ttywrite(mk->s, strlen(mk->s));
+			if(IS_SET(MODE_ECHO))
+				techo(mk->s, strlen(mk->s));
+			return;
+		}
+	}
+
+	if(e->xbutton.button == Button1) {
 		gettimeofday(&now, NULL);
 
 		/* Clear previous selection, logically and visually. */
@@ -800,7 +856,7 @@ bpress(XEvent *e) {
 			sel.snap = 0;
 		}
 		selsnap(sel.snap, &sel.bx, &sel.by, -1);
-		selsnap(sel.snap, &sel.ex, &sel.ey, 1);
+		selsnap(sel.snap, &sel.ex, &sel.ey, +1);
 		sel.b.x = sel.bx;
 		sel.b.y = sel.by;
 		sel.e.x = sel.ex;
@@ -817,10 +873,6 @@ bpress(XEvent *e) {
 		}
 		sel.tclick2 = sel.tclick1;
 		sel.tclick1 = now;
-	} else if(e->xbutton.button == Button4) {
-		ttywrite("\031", 1);
-	} else if(e->xbutton.button == Button5) {
-		ttywrite("\005", 1);
 	}
 }
 
@@ -3444,8 +3496,15 @@ run(void) {
 				xev--;
 			if(!FD_ISSET(cmdfd, &rfd) && !FD_ISSET(xfd, &rfd)) {
 				if(blinkset) {
-					drawtimeout.tv_usec = 1000 * \
-						blinktimeout;
+					if(TIMEDIFF(now, lastblink) \
+							> blinktimeout) {
+						drawtimeout.tv_usec = 1;
+					} else {
+						drawtimeout.tv_usec = (1000 * \
+							(blinktimeout - \
+							TIMEDIFF(now,
+								lastblink)));
+					}
 				} else {
 					tv = NULL;
 				}
