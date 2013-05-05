@@ -679,8 +679,14 @@ selected(int x, int y) {
 
 void
 selsnap(int mode, int *x, int *y, int direction) {
+	int i;
+
 	switch(mode) {
 	case SNAP_WORD:
+		/*
+		 * Snap around if the word wraps around at the end or
+		 * beginning of a line.
+		 */
 		for(;;) {
 			if(direction < 0 && *x <= 0) {
 				if(*y > 0 && term.line[*y - 1][term.col-1].mode
@@ -701,13 +707,20 @@ selsnap(int mode, int *x, int *y, int direction) {
 				}
 			}
 
-			if(term.line[*y][*x + direction].c[0] == ' ')
+			if(strchr(worddelimiters,
+					term.line[*y][*x + direction].c[0])) {
 				break;
+			}
 
 			*x += direction;
 		}
 		break;
 	case SNAP_LINE:
+		/*
+		 * Snap around if the the previous line or the current one
+		 * has set ATTR_WRAP at its end. Then the whole next or
+		 * previous line will be selected.
+		 */
 		*x = (direction < 0) ? 0 : term.col - 1;
 		if(direction < 0 && *y > 0) {
 			for(; *y > 0; *y += direction) {
@@ -726,6 +739,16 @@ selsnap(int mode, int *x, int *y, int direction) {
 		}
 		break;
 	default:
+		/*
+		 * Select the whole line when the end of line is reached.
+		 */
+		if(direction > 0) {
+			i = term.col;
+			while(--i > 0 && term.line[*y][i].c[0] == ' ')
+				/* nothing */;
+			if(i > 0 && i < *x)
+				*x = term.col - 1;
+		}
 		break;
 	}
 }
@@ -879,7 +902,7 @@ bpress(XEvent *e) {
 void
 selcopy(void) {
 	char *str, *ptr;
-	int x, y, bufsize, size;
+	int x, y, bufsize, size, i, ex;
 	Glyph *gp, *last;
 
 	if(sel.bx == -1) {
@@ -917,6 +940,21 @@ selcopy(void) {
 			 */
 			if(y < sel.e.y && !((gp-1)->mode & ATTR_WRAP))
 				*ptr++ = '\n';
+
+			/*
+			 * If the last selected line expands in the selection
+			 * after the visible text '\n' is appended.
+			 */
+			if(y == sel.e.y) {
+				i = term.col;
+				while(--i > 0 && term.line[y][i].c[0] == ' ')
+					/* nothing */;
+				ex = sel.e.x;
+				if(sel.b.y == sel.e.y && sel.e.x < sel.b.x)
+					ex = sel.b.x;
+				if(i < ex)
+					*ptr++ = '\n';
+			}
 		}
 		*ptr = 0;
 	}

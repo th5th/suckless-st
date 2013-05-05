@@ -9,7 +9,14 @@ static char font[] = "Inconsolata:pixelsize=16:antialias=true:autohint=true";
 static int borderpx = 2;
 static char shell[] = "/bin/bash";
 
-/* timeouts (in milliseconds) */
+/*
+ * word delimiter string
+ *
+ * More advanced example: " `'\"()[]{}"
+ */
+static char worddelimiters[] = " ";
+
+/* selection timeouts (in milliseconds) */
 static unsigned int doubleclicktimeout = 300;
 static unsigned int tripleclicktimeout = 600;
 
