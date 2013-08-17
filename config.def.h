@@ -9,6 +9,10 @@ static char font[] = "Inconsolata:pixelsize=16:antialias=true:autohint=true";
 static int borderpx = 2;
 static char shell[] = "/bin/bash";
 
+/* Kerning / character bounding-box mutlipliers */
+float cwscale = 1.0;
+float chscale = 1.0;
+
 /*
  * word delimiter string
  *
