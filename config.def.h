@@ -45,8 +45,8 @@ static int bellvolume = 0;
 
 /* TERM value */
 /* TERM value - use xterm to make arch colours hack work FIXME */
-//static char termname[] = "xterm";
-static char termname[] = "st-256color";
+static char termname[] = "xterm";
+//static char termname[] = "st-256color";
 
 static unsigned int tabspaces = 8;
 
