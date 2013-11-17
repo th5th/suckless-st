@@ -3501,15 +3501,7 @@ focus(XEvent *ev) {
 
 static inline bool
 match(uint mask, uint state) {
-	state &= ~ignoremod;
-
-	if(mask == XK_NO_MOD && state)
-		return false;
-	if(mask != XK_ANY_MOD && mask != XK_NO_MOD && !state)
-		return false;
-	if(mask == XK_ANY_MOD)
-		return true;
-	return state == mask;
+	return mask == XK_ANY_MOD || mask == (state & ~ignoremod);
 }
 
 void
@@ -3539,25 +3531,16 @@ kmap(KeySym k, uint state) {
 		if(!match(kp->mask, state))
 			continue;
 
-		if(kp->appkey > 0) {
-			if(!IS_SET(MODE_APPKEYPAD))
-				continue;
-			if(term.numlock && kp->appkey == 2)
-				continue;
-		} else if(kp->appkey < 0 && IS_SET(MODE_APPKEYPAD)) {
+		if(IS_SET(MODE_APPKEYPAD) ? kp->appkey < 0 : kp->appkey > 0)
 			continue;
-		}
+		if(term.numlock && kp->appkey == 2)
+			continue;
 
-		if((kp->appcursor < 0 && IS_SET(MODE_APPCURSOR)) ||
-				(kp->appcursor > 0
-				 && !IS_SET(MODE_APPCURSOR))) {
+		if(IS_SET(MODE_APPCURSOR) ? kp->appcursor < 0 : kp->appcursor > 0)
 			continue;
-		}
 
-		if((kp->crlf < 0 && IS_SET(MODE_CRLF)) ||
-				(kp->crlf > 0 && !IS_SET(MODE_CRLF))) {
+		if(IS_SET(MODE_CRLF) ? kp->crlf < 0 : kp->crlf > 0)
 			continue;
-		}
 
 		return kp->s;
 	}
@@ -3579,7 +3562,6 @@ kpress(XEvent *ev) {
 		return;
 
 	len = XmbLookupString(xw.xic, e, buf, sizeof buf, &ksym, &status);
-	e->state &= ~Mod2Mask;
 	/* 1. shortcuts */
 	for(bp = shortcuts; bp < shortcuts + LEN(shortcuts); bp++) {
 		if(ksym == bp->keysym && match(bp->mod, e->state)) {
@@ -3687,6 +3669,8 @@ run(void) {
 	gettimeofday(&last, NULL);
 
 	for(xev = actionfps;;) {
+		long deltatime;
+
 		FD_ZERO(&rfd);
 		FD_SET(cmdfd, &rfd);
 		FD_SET(xfd, &rfd);
@@ -3720,8 +3704,9 @@ run(void) {
 			gettimeofday(&lastblink, NULL);
 			dodraw = 1;
 		}
-		if(TIMEDIFF(now, last) \
-				> (xev? (1000/xfps) : (1000/actionfps))) {
+		deltatime = TIMEDIFF(now, last);
+		if(deltatime > (xev? (1000/xfps) : (1000/actionfps))
+				|| deltatime < 0) {
 			dodraw = 1;
 			last = now;
 		}
