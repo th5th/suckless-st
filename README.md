@@ -1,4 +1,4 @@
-st - simple terminal
+st - Simple Terminal
 --------------------
 st is a simple virtual terminal emulator for X which sucks less.
 
@@ -12,6 +12,8 @@ Installation
 ------------
 Edit config.mk to match your local setup (st is installed into
 the /usr/local namespace by default).
+
+Edit config.def.h to match your color preferences and the key bindings.
 
 Afterwards enter the following command to build and install st (if
 necessary as root):
